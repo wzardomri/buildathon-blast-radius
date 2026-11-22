@@ -70,7 +70,9 @@ To rebuild the maps, see `build/make_maps.sh`.
 The bundled `maps/values.tar.xz` holds comparison traces from running the
 unmodified pinned SQLGlot suite with `build/value_record.py`. No patches
 or failure labels are used to build it. Tests without a completed trace
-continue through ordinary selection.
+continue through ordinary selection. The bundled `maps/pinned-runtime-maps.tar.xz`
+holds pristine fingerprints and executor replay data produced by `brfp.py` and
+`build/record_replay.py` with the pinned interpreter and dependencies.
 
 ## Validation
 
