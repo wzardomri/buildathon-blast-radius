@@ -67,6 +67,11 @@ round-trip of arguments and results that a process boundary would apply.
 
 To rebuild the maps, see `build/make_maps.sh`.
 
+The bundled `maps/values.tar.xz` holds comparison traces from running the
+unmodified pinned SQLGlot suite with `build/value_record.py`. No patches
+or failure labels are used to build it. Tests without a completed trace
+continue through ordinary selection.
+
 ## Validation
 
 - Sample set, 30 commits: about 132 s simulated plus about 9 s CPU, with 0 misses. The
@@ -81,6 +86,10 @@ To rebuild the maps, see `build/make_maps.sh`.
 
 Any change the maps cannot reason about selects everything. That costs about 37 s,
 roughly a ninth of a single miss.
+
+## License and dependencies
+
+The selector is MIT-licensed. It vendors the pinned [SQLGlot source](https://github.com/tobymao/sqlglot/tree/eb11aec4be8cb2122afe713a4816662c3f0fb2fa), which retains its own MIT license. The build uses the organizer's pinned test environment from [requirements.lock](requirements.lock).
 
 ## Layout
 

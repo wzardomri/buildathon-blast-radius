@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import pickle
+import select
 import shutil
 import signal
 import sys
@@ -358,6 +359,7 @@ def run_record(root, tests, out_dir, jobs):
     results = {}
     running = {}
     pending = list(work)
+    test_timeout = int(os.environ.get("BR_VALUE_TEST_TIMEOUT", "120"))
     t0 = time.time()
     while pending or running:
         while pending and len(running) < jobs:
@@ -368,7 +370,7 @@ def run_record(root, tests, out_dir, jobs):
                 os.close(r)
                 ok = False
                 try:
-                    signal.alarm(120)
+                    signal.alarm(test_timeout)
                     devnull = os.open(os.devnull, os.O_RDWR)
                     os.dup2(devnull, 0)  # a test reading stdin must not wait
                     os.dup2(devnull, 1)
@@ -377,7 +379,7 @@ def run_record(root, tests, out_dir, jobs):
                     suite = loader.loadTestsFromName(name, sys.modules[mod])
                     res = unittest.TestResult()
                     suite.run(res)
-                    ok = res.testsRun > 0 and res.wasSuccessful()
+                    ok = res.testsRun > 0 and res.wasSuccessful() and not res.skipped
                 except BaseException:  # noqa: BLE001
                     ok = False
                 payload = pickle.dumps({"ok": ok, "rec": {k: (v if v == "U" else (frozenset(v[0]), None if v[1] is None else frozenset(v[1])))
@@ -386,16 +388,29 @@ def run_record(root, tests, out_dir, jobs):
                     fh.write(payload)
                 os._exit(0)
             os.close(w)
-            running[pid] = (r, tid, bytearray())
-        pid, _status = os.wait()
-        r, tid, buf = running.pop(pid)
-        with os.fdopen(r, "rb") as fh:
-            data = fh.read()
-        try:
-            d = pickle.loads(data)
-            results[tid] = d["rec"] if d["ok"] else None
-        except Exception:  # noqa: BLE001
+            running[r] = (pid, tid, bytearray())
+        # A worker may produce more than the pipe can hold. Drain available
+        # bytes before waiting for it to exit, as it may be blocked in write.
+        ready, _, _ = select.select(running, [], [])
+        for fd in ready:
+            pid, tid, data = running[fd]
+            chunk = os.read(fd, 65536)
+            if chunk:
+                data.extend(chunk)
+                continue
+            os.close(fd)
+            _, status = os.waitpid(pid, 0)
+            del running[fd]
             results[tid] = None
+            if status == 0:
+                try:
+                    d = pickle.loads(data)
+                    if d["ok"]:
+                        results[tid] = d["rec"]
+                except Exception:  # noqa: BLE001
+                    pass
+            if len(results) % 256 == 0:
+                print(f"processed {len(results)}/{len(work)} test traces", file=sys.stderr)
     print(f"recorded {sum(1 for v in results.values() if v is not None)}/{len(results)} tests "
           f"in {time.time() - t0:.0f}s", file=sys.stderr)
 

@@ -20,8 +20,8 @@ COPY vendor/sqlglot-eb11aec.tar.xz /tmp/sqlglot.tar.xz
 RUN python -c "import tarfile; tarfile.open('/tmp/sqlglot.tar.xz').extractall('/app/src', filter='data')" \
  && rm /tmp/sqlglot.tar.xz
 
-COPY selector.py brlib.py brfp.py brpool.py brreplay.py /app/
-COPY build/record_replay.py build/value_record.py /app/build/
+COPY brlib.py brfp.py brpool.py brreplay.py /app/
+COPY build/record_replay.py /app/build/
 COPY maps/maps.pkl.xz /app/maps/maps.pkl.xz
 
 # Bytecode for the pristine tree (the run's disk is read-only), then the
@@ -32,9 +32,16 @@ RUN python -c "import lzma, shutil; shutil.copyfileobj(lzma.open('/app/maps/maps
  && cd /app/src \
  && python -m compileall -q -j 4 sqlglot tests \
  && BR_MAPS_PKL=/app/maps/maps.pkl PYTHONPATH=/app/src python /app/brfp.py /app/maps/fp.pkl 1 2 3 4 5 \
- && (PYTHONPATH=/app/src python /app/build/record_replay.py /app/src /app/maps/replay.pkl || rm -f /app/maps/replay.pkl) \
- && (timeout 360 python /app/build/value_record.py /app/src /app/maps/maps.pkl /app/maps/values 4 || rm -rf /app/maps/values) \
- && python -m compileall -q /app/selector.py /app/brlib.py /app/brfp.py /app/brpool.py /app/brreplay.py \
+ && (PYTHONPATH=/app/src python /app/build/record_replay.py /app/src /app/maps/replay.pkl || rm -f /app/maps/replay.pkl)
+
+# Comparison records from the pinned suite. Shipping the completed map
+# keeps fresh image builds independent of the recorder's time budget.
+COPY maps/values.tar.xz /tmp/values.tar.xz
+RUN python -c "import tarfile; tarfile.open('/tmp/values.tar.xz').extractall('/app/maps', filter='data')" \
+ && rm /tmp/values.tar.xz
+
+COPY selector.py /app/
+RUN python -m compileall -q /app/selector.py /app/brlib.py /app/brfp.py /app/brpool.py /app/brreplay.py \
  && chmod -R a+rX /app
 
 CMD ["python", "/app/selector.py"]

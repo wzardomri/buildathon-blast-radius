@@ -296,6 +296,7 @@ class Analysis:
         self.fn_clean = 0  # files whose only changes are function bodies
         self.n_fps = 0
         self.all_pkg_py = False
+        self.warm_code_changes = {}
         self.replay_skip = {}  # replayed test -> queries the change cannot reach
 
     def note(self, s):
@@ -366,6 +367,7 @@ def analyse_static(ctx, patch_text):
         if fp.rename and fp.old_path:
             a.files[fp.old_path] = None
         a.files[fp.path] = new_text
+        a.warm_code_changes.pop(fp.path, None)
         a.hunks_by_file[fp.path] = fp.hunks
 
         path = fp.path or fp.old_path
@@ -395,13 +397,14 @@ def analyse_static(ctx, patch_text):
             if in_tests:
                 a.must |= maps["file_tests"].get(path, 0)
             continue
+        source_path = os.path.join(SRC, path)
         try:
-            old_co = compile(old_text, path, "exec", dont_inherit=True)
+            old_co = compile(old_text, source_path, "exec", dont_inherit=True)
         except SyntaxError:
             a.must |= ctx.all_bits
             continue
         try:
-            new_co = compile(new_text, path, "exec", dont_inherit=True)
+            new_co = compile(new_text, source_path, "exec", dont_inherit=True)
         except (SyntaxError, ValueError) as e:
             a.note(f"syntax error in {path}: {e}")
             # importing this module fails. Which test files then fail to
@@ -421,6 +424,8 @@ def analyse_static(ctx, patch_text):
         changed, added, moved = brlib.code_diff(old_co, new_co)
         if (in_pkg and not added and all(brlib.is_function_code(co) and kind == "self" for co, kind in changed)):
             a.fn_clean += 1
+            if a.all_pkg_py and changed:
+                a.warm_code_changes[path] = (old_co, new_co, changed)
         hunk_lines = brlib.changed_old_lines(fp.hunks)
         stmt_index = None
         file_lines = maps.get("line_tests", {}).get(path)
@@ -1669,17 +1674,7 @@ def swap_in(ctx, a):
     if not (a.all_pkg_py and a.n_fps and a.fn_clean == a.n_fps and not a.need_fp and not a.must):
         return False
     plan = []
-    for rel, new_text in a.files.items():
-        if new_text is None or not rel.endswith(".py"):
-            return False
-        src_path = os.path.join(SRC, rel)
-        with open(src_path, encoding="utf-8") as f:
-            old_text = f.read()
-        old_co = compile(old_text, src_path, "exec")
-        new_co = compile(new_text, src_path, "exec")
-        changed, added, _moved = brlib.code_diff(old_co, new_co)
-        if added:
-            return False
+    for rel, (old_co, new_co, changed) in a.warm_code_changes.items():
         old_paths = _code_paths(old_co)
         new_paths = _code_paths(new_co)
         by_obj = {id(c): p for p, c in old_paths.items()}
